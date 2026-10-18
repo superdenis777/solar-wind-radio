@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solar Wind Radio</title>
+<meta name="description" content="Live NOAA solar wind data turned into generative ambient music in your browser.">
+<style>
+  :root {
+    --bg: #070910;
+    --panel: #0f1320;
+    --line: #1e2538;
+    --text: #dfe5f3;
+    --muted: #7d879e;
+    --accent: #ffb547;
+    --accent2: #6fd3ff;
+    --warn: #ff6b6b;
+    --ok: #59e3a0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+    background-image: radial-gradient(ellipse at 50% -20%, #1a1530 0%, transparent 60%);
+    min-height: 100vh;
+  }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .04em; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .controls { display: flex; gap: 12px; align-items: center; }
+  button {
+    font: inherit; background: var(--accent); color: #1a1000; border: 0; border-radius: 6px;
+    padding: 10px 18px; cursor: pointer; font-weight: 700; letter-spacing: .05em;
+  }
+  button.playing { background: transparent; color: var(--accent); outline: 1px solid var(--accent); }
+  input[type=range] { accent-color: var(--accent); width: 110px; }
+  #viz { width: 100%; height: 160px; display: block; margin: 20px 0 12px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .14em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .k { color: var(--muted); }
+  .v { text-align: right; font-variant-numeric: tabular-nums; }
+  .v.big { color: var(--accent); }
+  .dflt { color: var(--warn); font-size: 11px; margin-left: 6px; }
+  #chord { font-size: 22px; color: var(--accent2); margin: 2px 0 8px; }
+  #hist { width: 100%; height: 90px; display: block; }
+  .status { margin-top: 12px; font-size: 12px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--warn); }
+  footer { margin-top: 20px; color: var(--muted); font-size: 11px; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>☀ Solar Wind <span>Radio</span></h1>
+      <div class="sub">Live solar wind data from NOAA's L1 monitor, turned into ambient music in your browser.</div>
+    </div>
+    <div class="controls">
+      <label class="k" for="vol">vol</label>
+      <input id="vol" type="range" min="0" max="1" step="0.01" value="0.7">
+      <button id="play">▶ LISTEN</button>
+    </div>
+  </header>
+
+  <canvas id="viz"></canvas>
+
+  <div class="grid">
+    <section>
+      <h2>Space weather · telemetry</h2>
+      <div class="row"><span class="k">Wind speed</span><span class="v big" id="t-speed">–</span></div>
+      <div class="row"><span class="k">Proton density</span><span class="v big" id="t-density">–</span></div>
+      <div class="row"><span class="k">Temperature</span><span class="v big" id="t-temp">–</span></div>
+      <div class="row"><span class="k">IMF Bz (GSM)</span><span class="v" id="t-bz">–</span></div>
+      <div class="row"><span class="k">IMF Bt</span><span class="v" id="t-bt">–</span></div>
+      <div class="row"><span class="k">Sample time (UTC)</span><span class="v" id="t-time">–</span></div>
+      <div class="row"><span class="k">Data age</span><span class="v" id="t-age">–</span></div>
+    </section>
+    <section>
+      <h2>Music · live parameters</h2>
+      <div id="chord">–</div>
+      <div class="row"><span class="k">Root</span><span class="v" id="m-root">–</span></div>
+      <div class="row"><span class="k">Scale (speed)</span><span class="v" id="m-scale">–</span></div>
+      <div class="row"><span class="k">Tempo (speed)</span><span class="v" id="m-bpm">–</span></div>
+      <div class="row"><span class="k">Filter cutoff (density)</span><span class="v" id="m-cutoff">–</span></div>
+      <div class="row"><span class="k">Voices / FM index (density)</span><span class="v" id="m-fm">–</span></div>
+      <div class="row"><span class="k">Gain / width (temperature)</span><span class="v" id="m-gain">–</span></div>
+      <div class="row"><span class="k">Reverb (southward Bz)</span><span class="v" id="m-rev">–</span></div>
+    </section>
+  </div>
+
+  <section style="margin-top:12px">
+    <h2>Last 24 h · <span style="color:var(--accent)">speed</span> / <span style="color:var(--accent2)">density</span></h2>
+    <canvas id="hist"></canvas>
+  </section>
+
+  <div class="status"><span class="dot" id="dot"></span><span id="status">Connecting to NOAA…</span></div>
+
+  <footer>
+    Data: NOAA SWPC Real-Time Solar Wind (<a href="https://www.swpc.noaa.gov/products/real-time-solar-wind" target="_blank" rel="noopener">swpc.noaa.gov</a>), updated every minute.
+    Faster wind raises the root note and tempo and shifts to darker scales. Denser plasma opens the filter and adds voices and FM bells.
+    Hotter plasma makes it louder and wider. A southward magnetic field adds reverb.
+  </footer>
+</main>
+
+<script>
+// ---------- Config ----------
+const WIND_URL = "https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json";
+const MAG_URL  = "https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json";
+const POLL_MS = 60_000;
+const DEFAULTS = { speed: 400, density: 5, temperature: 100_000, bz: 0, bt: 5 };
+const LOOKAHEAD = 1.5;          // seconds of audio scheduled ahead (survives background-tab timer throttling)
+const GLIDE = 3;                // time constant (s) for parameter glides
+
+const SCALES = [
+  { name: "Lydian",     steps: [0, 2, 4, 6, 7, 9, 11] },
+  { name: "Ionian",     steps: [0, 2, 4, 5, 7, 9, 11] },
+  { name: "Dorian",     steps: [0, 2, 3, 5, 7, 9, 10] },
+  { name: "Aeolian",    steps: [0, 2, 3, 5, 7, 8, 10] },
+  { name: "Phrygian",   steps: [0, 1, 3, 5, 7, 8, 10] },
+];
+// Markov-ish chord moves by scale degree
+const MOVES = { 0: [3, 4, 5, 2], 1: [4, 6, 3], 2: [5, 3, 0], 3: [0, 4, 1], 4: [0, 5, 3], 5: [3, 1, 4], 6: [0, 2] };
+const NOTE_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
+const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"];
+
+// ---------- Helpers ----------
+const $ = id => document.getElementById(id);
+const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+const noteName = m => NOTE_NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1);
+const lnorm = (x, lo, hi) => clamp((Math.log10(x) - Math.log10(lo)) / (Math.log10(hi) - Math.log10(lo)), 0, 1);
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+const num = v => (typeof v === "number" && isFinite(v)) ? v : null;
+
+// ---------- State ----------
+let data = { ...DEFAULTS, time: null, missing: Object.keys(DEFAULTS) };
+let history = [];
+let P = computeParams(data);
+let ctx = null, nodes = null;
+let voices = [], chord = null, degree = 0;
+let nextBeat = 0, beatCount = 0;
+let failures = 0, pollTimer = null;
+
+// ---------- Data -> musical parameters ----------
+function computeParams(d) {
+  const sN = clamp((d.speed - 250) / 600, 0, 1);          // 250..850 km/s
+  const dN = lnorm(Math.max(d.density, 0.01), 0.5, 30);    // 0.5..30 p/cm³ (log)
+  const tN = lnorm(Math.max(d.temperature, 1), 2e4, 1e6);  // 20k..1M K (log)
+  const bzN = clamp(-d.bz / 15, 0, 1);                      // southward strength
+  return {
+    sN, dN, tN, bzN,
+    rootMidi: 36 + Math.round(sN * 12),                    // C2..C3
+    scale: SCALES[Math.min(SCALES.length - 1, Math.floor(sN * SCALES.length))],
+    bpm: 48 + sN * 48,
+    cutoff: 350 * Math.pow(5000 / 350, dN),
+    nVoices: 3 + Math.round(dN * 3),
+    fmIndex: 0.5 + dN * 6,
+    bellProb: 0.2 + dN * 0.45,
+    overtones: 1 + Math.round(dN * 4),
+    padLevel: 0.55 + tN * 0.45,
+    width: 0.15 + tN * 0.85,
+    detune: 3 + tN * 17,
+    reverb: 0.25 + bzN * 0.5,
+    wind: 0.015 + sN * 0.05,
+  };
+}
+
+// ---------- Networking ----------
+async function getJSON(url) {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  return r.json();
+}
+
+// Most recent non-null value of `field` among the newest active rows (within ~10 min)
+function latest(rows, field) {
+  for (const r of rows.slice(0, 10)) { const v = num(r[field]); if (v !== null) return { v, t: r.time_tag }; }
+  return null;
+}
+
+function activeSorted(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .filter(r => r && r.active !== false && r.time_tag)
+    .sort((a, b) => (a.time_tag < b.time_tag ? 1 : -1));
+}
+
+async function poll() {
+  clearTimeout(pollTimer);
+  try {
+    const [w, m] = await Promise.allSettled([getJSON(WIND_URL), getJSON(MAG_URL)]);
+    if (w.status !== "fulfilled") throw w.reason;
+    const wind = activeSorted(w.value);
+    const mag = m.status === "fulfilled" ? activeSorted(m.value) : [];
+    if (!wind.length) throw new Error("empty plasma feed");
+
+    const fields = {
+      speed: latest(wind, "proton_speed"),
+      density: latest(wind, "proton_density"),
+      temperature: latest(wind, "proton_temperature"),
+      bz: latest(mag, "bz_gsm"),
+      bt: latest(mag, "bt"),
+    };
+    const next = { missing: [] };
+    for (const [k, got] of Object.entries(fields)) {
+      if (got) next[k] = got.v; else { next[k] = DEFAULTS[k]; next.missing.push(k); }
+    }
+    next.time = (fields.speed || fields.density || { t: wind[0].time_tag }).t;
+    data = next;
+
+    // 24 h history (oldest first, thinned to ~1 point / 5 min)
+    history = wind.filter((r, i) => i % 5 === 0 && num(r.proton_speed) !== null && num(r.proton_density) !== null)
+                  .map(r => ({ s: r.proton_speed, d: r.proton_density })).reverse();
+
+    P = computeParams(data);
+    applyParams();
+    failures = 0;
+    setStatus(true, `Live · last fetched ${new Date().toLocaleTimeString()}` + (m.status !== "fulfilled" ? " (mag feed unavailable, Bz defaulted)" : ""));
+    pollTimer = setTimeout(poll, POLL_MS);
+  } catch (e) {
+    failures++;
+    const wait = Math.min(300, 5 * 2 ** Math.min(failures, 6));
+    setStatus(false, `Feed error (${e.message || e}). Music continues with last values; retrying in ${wait}s (attempt ${failures})`);
+    pollTimer = setTimeout(poll, wait * 1000);
+  }
+  renderDashboard();
+}
+
+// ---------- Audio graph ----------
+function makeImpulse(seconds, decay) {
+  const len = Math.floor(ctx.sampleRate * seconds);
+  const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let c = 0; c < 2; c++) {
+    const ch = buf.getChannelData(c);
+    for (let i = 0; i < len; i++) ch[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+  }
+  return buf;
+}
+
+function lfo(rate, depth, target) {
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.frequency.value = rate; g.gain.value = depth;
+  o.connect(g).connect(target); o.start();
+  return g;
+}
+
+function buildGraph() {
+  const n = {};
+  n.master = ctx.createGain(); n.master.gain.value = 0;
+  n.comp = ctx.createDynamicsCompressor();
+  n.comp.threshold.value = -18; n.comp.ratio.value = 3; n.comp.attack.value = 0.05; n.comp.release.value = 0.4;
+  n.analyser = ctx.createAnalyser(); n.analyser.fftSize = 2048; n.analyser.smoothingTimeConstant = 0.85;
+  n.master.connect(n.comp).connect(n.analyser).connect(ctx.destination);
+
+  // Reverb send
+  n.reverb = ctx.createConvolver(); n.reverb.buffer = makeImpulse(6, 2.5);
+  n.revReturn = ctx.createGain(); n.revReturn.gain.value = P.reverb;
+  n.reverb.connect(n.revReturn).connect(n.master);
+
+  // Pad: voices -> shared lowpass (with slow sweep LFO) -> pad bus
+  n.padFilter = ctx.createBiquadFilter(); n.padFilter.type = "lowpass"; n.padFilter.Q.value = 0.7;
+  n.padFilter.frequency.value = P.cutoff;
+  n.padSweep = lfo(0.031, P.cutoff * 0.3, n.padFilter.frequency);
+  n.padBus = ctx.createGain(); n.padBus.gain.value = P.padLevel;
+  n.padFilter.connect(n.padBus); n.padBus.connect(n.master); n.padBus.connect(n.reverb);
+
+  // Sub-bass drone (sine root + soft triangle an octave up)
+  n.sub = ctx.createOscillator(); n.sub.type = "sine"; n.sub.frequency.value = mtof(P.rootMidi);
+  n.sub2 = ctx.createOscillator(); n.sub2.type = "triangle"; n.sub2.frequency.value = mtof(P.rootMidi + 12);
+  n.subGain = ctx.createGain(); n.subGain.gain.value = 0.22;
+  const sub2Gain = ctx.createGain(); sub2Gain.gain.value = 0.05;
+  n.sub.connect(n.subGain).connect(n.master);
+  n.sub2.connect(sub2Gain).connect(n.master); sub2Gain.connect(n.reverb);
+  lfo(0.07, 0.04, n.subGain.gain);
+  n.sub.start(); n.sub2.start();
+
+  // Harmonic overtone shimmer (count follows density)
+  n.overtones = [3, 4, 5, 6, 8].map((h, i) => {
+    const o = ctx.createOscillator(), g = ctx.createGain(), shimmer = ctx.createGain(), p = ctx.createStereoPanner();
+    o.frequency.value = mtof(P.rootMidi) * h;
+    g.gain.value = 0;                       // on/off level, set by density
+    shimmer.gain.value = 0.6;               // slow tremble, 0.1..1.1
+    lfo(0.05 + Math.random() * 0.1, 0.5, shimmer.gain);
+    p.pan.value = (i % 2 ? 1 : -1) * 0.5 * P.width;
+    o.connect(g).connect(shimmer).connect(p); p.connect(n.master); p.connect(n.reverb);
+    o.start();
+    return { o, g, p, h, side: i % 2 ? 1 : -1 };
+  });
+
+  // Solar "wind" texture: looping noise through a swept bandpass
+  const nb = ctx.createBuffer(1, ctx.sampleRate * 4, ctx.sampleRate);
+  const nd = nb.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  n.noise = ctx.createBufferSource(); n.noise.buffer = nb; n.noise.loop = true;
+  n.windFilter = ctx.createBiquadFilter(); n.windFilter.type = "bandpass"; n.windFilter.Q.value = 6;
+  n.windFilter.frequency.value = 500 + P.sN * 900;
+  lfo(0.043, 250, n.windFilter.frequency);
+  n.windGain = ctx.createGain(); n.windGain.gain.value = P.wind;
+  n.noise.connect(n.windFilter).connect(n.windGain).connect(n.reverb);
+  n.noise.start();
+
+  // Bells -> ping-pong-ish delay + reverb
+  n.bellBus = ctx.createGain(); n.bellBus.gain.value = 0.5;
+  n.delay = ctx.createDelay(4); n.delay.delayTime.value = (60 / P.bpm) * 0.75;
+  n.fb = ctx.createGain(); n.fb.gain.value = 0.38;
+  const dlp = ctx.createBiquadFilter(); dlp.type = "lowpass"; dlp.frequency.value = 2500;
+  n.bellBus.connect(n.master); n.bellBus.connect(n.reverb); n.bellBus.connect(n.delay);
+  n.delay.connect(dlp).connect(n.fb).connect(n.delay);
+  dlp.connect(n.master);
+  return n;
+}
+
+function applyParams() {
+  if (!ctx || !nodes) return;
+  const t = ctx.currentTime, n = nodes;
+  n.padFilter.frequency.setTargetAtTime(P.cutoff, t, GLIDE);
+  n.padSweep.gain.setTargetAtTime(P.cutoff * 0.3, t, GLIDE);
+  n.padBus.gain.setTargetAtTime(P.padLevel, t, GLIDE);
+  n.revReturn.gain.setTargetAtTime(P.reverb, t, GLIDE);
+  n.sub.frequency.setTargetAtTime(mtof(P.rootMidi), t, 4);
+  n.sub2.frequency.setTargetAtTime(mtof(P.rootMidi + 12), t, 4);
+  n.windGain.gain.setTargetAtTime(P.wind, t, GLIDE);
+  n.windFilter.frequency.setTargetAtTime(500 + P.sN * 900, t, GLIDE);
+  n.delay.delayTime.setTargetAtTime((60 / P.bpm) * 0.75, t, 2);
+  n.overtones.forEach((ov, i) => {
+    ov.o.frequency.setTargetAtTime(mtof(P.rootMidi) * ov.h, t, 4);
+    ov.g.gain.setTargetAtTime(i < P.overtones ? 0.018 / (1 + i * 0.4) : 0, t, GLIDE);
+    ov.p.pan.setTargetAtTime(ov.side * 0.5 * P.width, t, GLIDE);
+  });
+  for (const v of voices) {
+    v.oscs.forEach((o, i) => o.detune.setTargetAtTime((i - 1) * P.detune, t, GLIDE));
+    v.pan.pan.setTargetAtTime(v.side * P.width, t, GLIDE);
+  }
+}
+
+// ---------- Generative music ----------
+function buildChord(deg) {
+  const steps = P.scale.steps, notes = [];
+  for (let k = 0; k < P.nVoices; k++) {
+    const idx = deg + 2 * k;
+    notes.push(P.rootMidi + 12 + steps[idx % 7] + 12 * Math.floor(idx / 7));
+  }
+  const third = notes[1] - notes[0], fifth = notes[2] - notes[0];
+  let q = third === 4 ? (fifth === 8 ? "aug" : "") : (fifth === 6 ? "dim" : "m");
+  let name = NOTE_NAMES[notes[0] % 12] + q;
+  if (notes.length >= 4) {
+    const sev = notes[3] - notes[0];
+    if (q === "dim" && sev === 10) name = NOTE_NAMES[notes[0] % 12] + "m7♭5";
+    else name += sev === 11 ? "maj7" : "7";
+  }
+  if (notes.length >= 5) name += " add9";
+  if (notes.length >= 6) name += " add11";
+  const roman = (q === "m" || q === "dim") ? ROMAN[deg].toLowerCase() : ROMAN[deg];
+  return { notes, name, roman };
+}
+
+function changeChord(t, dur) {
+  degree = beatCount === 0 ? 0 : pick(MOVES[degree]);
+  const c = buildChord(degree);
+  const xf = Math.min(4, dur * 0.5);
+  // release the old voices with an exponential-ish fade (no clicks)
+  for (const v of voices) {
+    v.g.gain.setTargetAtTime(0, t, xf / 4);
+    v.oscs.forEach(o => o.stop(t + xf * 2.5));
+  }
+  const level = 0.11 / Math.sqrt(c.notes.length);
+  voices = c.notes.map((m, i) => {
+    const g = ctx.createGain(), pan = ctx.createStereoPanner();
+    const side = c.notes.length === 1 ? 0 : (i / (c.notes.length - 1)) * 2 - 1;
+    pan.pan.value = side * P.width;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(level, t + xf);
+    const oscs = [-1, 0, 1].map(s => {
+      const o = ctx.createOscillator();
+      o.type = s === 0 ? "triangle" : "sawtooth";
+      o.frequency.value = mtof(m);
+      o.detune.value = s * P.detune;
+      o.connect(g); o.start(t);
+      return o;
+    });
+    g.connect(pan).connect(nodes.padFilter);
+    return { g, pan, oscs, side };
+  });
+  setTimeout(() => { chord = c; renderDashboard(); }, Math.max(0, (t - ctx.currentTime) * 1000));
+}
+
+function bell(t) {
+  const pool = chord ? chord.notes : [P.rootMidi + 12];
+  const m = pick(pool) + pick([12, 24, 24]);
+  const f = mtof(m);
+  const car = ctx.createOscillator(), mod = ctx.createOscillator(), mg = ctx.createGain();
+  const env = ctx.createGain(), pan = ctx.createStereoPanner();
+  const dur = 2.5 + Math.random() * 3, amp = 0.05 + Math.random() * 0.04;
+  car.frequency.value = f;
+  mod.frequency.value = f * pick([2, 3, 3.5]);
+  mg.gain.setValueAtTime(f * P.fmIndex, t);
+  mg.gain.exponentialRampToValueAtTime(Math.max(1, f * 0.05), t + dur);
+  env.gain.setValueAtTime(0.0001, t);
+  env.gain.linearRampToValueAtTime(amp, t + 0.015);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  pan.pan.value = (Math.random() * 2 - 1) * P.width;
+  mod.connect(mg).connect(car.frequency);
+  car.connect(env).connect(pan).connect(nodes.bellBus);
+  car.start(t); mod.start(t);
+  car.stop(t + dur + 0.1); mod.stop(t + dur + 0.1);
+}
+
+function scheduler() {
+  if (!ctx || ctx.state !== "running") return;
+  const now = ctx.currentTime;
+  if (nextBeat < now) nextBeat = now + 0.05; // recover after suspension / long stalls
+  while (nextBeat < now + LOOKAHEAD) {
+    const beat = 60 / P.bpm;
+    if (beatCount % 8 === 0) changeChord(nextBeat, beat * 8);
+    if (Math.random() < P.bellProb) bell(nextBeat + (Math.random() < 0.3 ? beat / 2 : 0));
+    nextBeat += beat; beatCount++;
+  }
+}
+
+// ---------- Transport ----------
+async function togglePlay() {
+  const btn = $("play");
+  if (!ctx) {
+    ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "playback" });
+    nodes = buildGraph();
+    nextBeat = ctx.currentTime + 0.1;
+    setInterval(scheduler, 200);
+    scheduler();
+    applyParams();
+  } else if (ctx.state === "running") {
+    nodes.master.gain.setTargetAtTime(0, ctx.currentTime, 0.3);
+    btn.textContent = "▶ LISTEN"; btn.classList.remove("playing");
+    setTimeout(() => ctx.suspend(), 1500);
+    return;
+  }
+  await ctx.resume();
+  nodes.master.gain.cancelScheduledValues(ctx.currentTime);
+  nodes.master.gain.setTargetAtTime(+$("vol").value, ctx.currentTime, 1.5);
+  btn.textContent = "❚❚ PAUSE"; btn.classList.add("playing");
+}
+
+$("play").addEventListener("click", togglePlay);
+$("vol").addEventListener("input", e => {
+  try { localStorage.setItem("swr-vol", e.target.value); } catch {}
+  if (ctx && ctx.state === "running") nodes.master.gain.setTargetAtTime(+e.target.value, ctx.currentTime, 0.1);
+});
+try { const v = localStorage.getItem("swr-vol"); if (v !== null) $("vol").value = v; } catch {}
+
+// ---------- Dashboard ----------
+function setStatus(ok, msg) { $("dot").className = "dot " + (ok ? "ok" : "bad"); $("status").textContent = msg; }
+
+function cell(id, text, key) {
+  $(id).innerHTML = text + (key && data.missing.includes(key) ? '<span class="dflt">default</span>' : "");
+}
+
+function renderDashboard() {
+  cell("t-speed", `${data.speed.toFixed(0)} km/s`, "speed");
+  cell("t-density", `${data.density.toFixed(2)} p/cm³`, "density");
+  cell("t-temp", `${Math.round(data.temperature).toLocaleString()} K`, "temperature");
+  cell("t-bz", `${data.bz >= 0 ? "+" : ""}${data.bz.toFixed(2)} nT ${data.bz < -5 ? "▼ south" : ""}`, "bz");
+  cell("t-bt", `${data.bt.toFixed(2)} nT`, "bt");
+  $("t-time").textContent = data.time ? data.time.replace("T", " ").slice(0, 16) : "–";
+  updateAge();
+
+  $("m-root").textContent = `${noteName(P.rootMidi)} · ${mtof(P.rootMidi).toFixed(1)} Hz`;
+  $("m-scale").textContent = P.scale.name;
+  $("m-bpm").textContent = `${P.bpm.toFixed(0)} BPM`;
+  $("m-cutoff").textContent = `${P.cutoff.toFixed(0)} Hz`;
+  $("m-fm").textContent = `${P.nVoices} · ${P.fmIndex.toFixed(1)}`;
+  $("m-gain").textContent = `${(P.padLevel * 100).toFixed(0)}% · ${(P.width * 100).toFixed(0)}%`;
+  $("m-rev").textContent = `${(P.reverb * 100).toFixed(0)}%`;
+  $("chord").textContent = chord ? `${chord.roman} · ${chord.name}  (${chord.notes.map(noteName).join(" ")})` : "press listen";
+  drawHistory();
+}
+
+function updateAge() {
+  if (!data.time) return;
+  const mins = (Date.now() - Date.parse(data.time + "Z")) / 60000;
+  $("t-age").innerHTML = mins < 15 ? `${mins.toFixed(0)} min` : `<span style="color:var(--warn)">${mins.toFixed(0)} min (stale)</span>`;
+}
+setInterval(updateAge, 15000);
+
+function fitCanvas(c) {
+  const r = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  if (c.width !== Math.round(r.width * dpr) || c.height !== Math.round(r.height * dpr)) {
+    c.width = Math.round(r.width * dpr); c.height = Math.round(r.height * dpr);
+  }
+  return c.getContext("2d");
+}
+
+function drawHistory() {
+  const c = $("hist"), g = fitCanvas(c), W = c.width, H = c.height;
+  g.clearRect(0, 0, W, H);
+  if (history.length < 2) return;
+  const line = (vals, color) => {
+    const lo = Math.min(...vals), hi = Math.max(...vals), span = hi - lo || 1;
+    g.strokeStyle = color; g.lineWidth = 1.5 * (window.devicePixelRatio || 1); g.beginPath();
+    vals.forEach((v, i) => {
+      const x = (i / (vals.length - 1)) * W, y = H - 4 - ((v - lo) / span) * (H - 8);
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    });
+    g.stroke();
+  };
+  const css = getComputedStyle(document.documentElement);
+  line(history.map(h => Math.log10(Math.max(h.d, 0.01))), css.getPropertyValue("--accent2"));
+  line(history.map(h => h.s), css.getPropertyValue("--accent"));
+}
+window.addEventListener("resize", drawHistory);
+
+function drawViz() {
+  const c = $("viz"), g = fitCanvas(c), W = c.width, H = c.height;
+  g.fillStyle = "rgba(15,19,32,0.35)"; g.fillRect(0, 0, W, H);
+  if (nodes && ctx.state === "running") {
+    const a = nodes.analyser, bins = new Uint8Array(a.frequencyBinCount);
+    a.getByteFrequencyData(bins);
+    const N = 96;
+    for (let i = 0; i < N; i++) {
+      // log-spaced bins
+      const idx = Math.floor(Math.pow(bins.length, i / N));
+      const v = bins[Math.min(bins.length - 1, idx)] / 255;
+      const x = (i / N) * W, bw = W / N - 1, h = v * H * 0.9;
+      g.fillStyle = `hsla(${38 + (i / N) * 160}, 90%, ${45 + v * 25}%, ${0.25 + v * 0.7})`;
+      g.fillRect(x, H - h, bw, h);
+    }
+    const td = new Uint8Array(a.fftSize); a.getByteTimeDomainData(td);
+    g.strokeStyle = "rgba(255,181,71,0.8)"; g.lineWidth = 1.5; g.beginPath();
+    for (let i = 0; i < td.length; i += 4) {
+      const x = (i / td.length) * W, y = (td[i] / 255) * H;
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    }
+    g.stroke();
+  }
+  requestAnimationFrame(drawViz);
+}
+
+renderDashboard();
+drawViz();
+poll();
+</script>
+</body>
+</html>
